@@ -22,6 +22,7 @@ from gt4py.next import common, config
 from gt4py.next.otf import code_specs, definitions, stages, workflow
 from gt4py.next.otf.compilation import cache as gtx_cache
 from gt4py.next.program_processors.runners.dace.workflow import common as gtx_wfdcommon
+from gt4py.next.program_processors.runners.dace.workflow import exner_aos
 
 
 class CompiledDaceProgram:
@@ -148,6 +149,18 @@ class DaCeCompiler(
             sdfg.build_folder = sdfg_build_folder
             with locking.lock(sdfg_build_folder):
                 sdfg_program = sdfg.compile(validate=False)
+                # Dev (Claude): exner-AoS post-codegen transform (AMD MI300A), thetarho only.
+                # OPT-IN via GT4PY_EXNER_AOS=1. N is hardcoded to the regional grid (exner_aos.py
+                # _N_REGIONAL=3562240); the transform self-checks and fails closed (no patch ->
+                # original correct code). Measured -14.3% (1.266 -> 1.085 ms), correctness-passing.
+                if sdfg.name == exner_aos.PROGRAM and os.environ.get("GT4PY_EXNER_AOS") == "1":
+                    if exner_aos.apply_exner_aos(str(sdfg_build_folder)):
+                        from dace.codegen import compiler as _dace_compiler
+
+                        _dace_compiler.configure_and_compile(str(sdfg_build_folder), sdfg.name)
+                        sdfg_program = _dace_compiler.load_precompiled_sdfg(
+                            folder=str(sdfg_build_folder), sdfg=sdfg
+                        )
 
         assert inp.binding_source is not None
         return CompiledDaceProgram(
